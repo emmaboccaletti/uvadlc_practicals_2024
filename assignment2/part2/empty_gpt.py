@@ -42,16 +42,6 @@ class RMSNorm(nn.Module):
     def forward(self, x):
         # Compute the norm of the input tensor and divide by the norm
         # Scale the normalized tensor by the learned weight parameter
-
-        # RMSNorm uses the root mean square of activations for normalization.
-        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
-
-        # Scale x by dividing each elements it computes by RMS
-        rms_normalized_x = x / rms
-
-        # Scale by the learnable weight
-        output = self.weight * rms_normalized_x
-
         return output
 
 class CausalSelfAttention(nn.Module):
@@ -101,8 +91,7 @@ class CausalSelfAttention(nn.Module):
 
         # Frequency for RoPE
         dim = config.n_embd // config.n_head
-        self.inv_freq = (1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))).to("cuda")
-        # self.inv_freq = self.inv_freq.to("cuda")
+        self.inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
 
         self.config  = config 
         self.debug = debug
@@ -120,58 +109,32 @@ class CausalSelfAttention(nn.Module):
             Tuple[torch.Tensor, torch.Tensor]: Tuple containing the modified query and key tensors.
         """
         # Generate RoPE embeddings dynamically based on T
-        device = xq.device  # Use xq's device
-        self.inv_freq = self.inv_freq.to(device)
-        # print("inv_freq using device:", device)
-        # print("xq using device:", xq.device)
-        # print("xq using device:", xk.device)
-        seq_pos = torch.arange(T, device=device, dtype=self.inv_freq.dtype)  # Shape: (T)
-        seq_pos = seq_pos.unsqueeze(1) # Shape: (T, 1)
-        freqs = self.inv_freq * seq_pos   # Shape: (T, dim // 2)
-        # pos_emb = torch.cat([freqs.sin(), freqs.cos()], dim=-1) # Shape: (T, dim)
-        # pos_emb = pos_emb.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, T, dim)
+        seq_pos = ...  # Shape: (T)
+        freqs = ...    # Shape: (T, dim // 2)
+        pos_emb = ...  # Shape: (1, 1, T, dim)
         
         # Split pos into sin and cos components, repeating each to match xq and xk dimensions
-        pos_sin = freqs.sin()
-        pos_cos = freqs.cos()
-
-        # Obtain xq1 and xq2 
-        # Split the query tensor into two halves along the last dimension (embedding dimension).
-        # The two halves, xq1 and xq2, represent even and odd dimensions.
-        xq1, xq2 = xq.chunk(2, dim=-1)
-        xk1, xk2 = xk.chunk(2, dim=-1)
-
+        pos_sin = ...
+        pos_cos = ...
         
         # Apply RoPE transformation: pair and rotate dimensions
-        # Rot([x1,x2])=[ [x1⋅cos(freq)−x2⋅sin(freq)]
-        #                [x1⋅sin(freq)+x2⋅cos(freq)] ]
-
         # Rotate query and key tensors
-        xq_rot = torch.cat([xq1 * pos_cos - xq2 * pos_sin, xq1 * pos_sin + xq2 * pos_cos], dim=-1).to(device)
-        xk_rot = torch.cat([xk1 * pos_cos - xk2 * pos_sin, xk1 * pos_sin + xk2 * pos_cos], dim=-1).to(device)
-
-        # print("xq_rot using device:", xq_rot.device)
-        # print("xk_rot using device:", xk_rot.device)
-        # raise NotImplementedError
+        xq_rot = ...
+        xk_rot = ...
+        raise NotImplementedError
         
         return xq_rot, xk_rot
         
     def forward(self, x):
-        # x = x.to('cuda')
-        device = x.device # Ensure all components use the input tensor's device
-        # print("x using device:", device)
-        self.c_proj = self.c_proj.to(device)
-        self.attn_dropout = self.attn_dropout.to(device)
-        self.resid_dropout = self.resid_dropout.to(device)
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         # Split output of attention-head in query, key and value
-        q, k ,v  = self.c_attn(x).split(C, dim=2)
+        q, k ,v  = ...
 
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2).to(device)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2).to(device)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2).to(device)
+        q = ...
+        k = ...
+        v = ...
 
         if not self.config.abs_emb:
             q, k = self.apply_rotary_emb(q, k, T)
@@ -181,25 +144,13 @@ class CausalSelfAttention(nn.Module):
         # Mask the calculated attention weights with the mask parameter.
 
         if self.use_flash_attn:
-            y = F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_dropout.p, is_causal=True)
+            y = ...
         else:
             # Compute attention scores
-             #attention = Queries x Keys/ sqrt(d_k) where d_k is dimension of keys/queries 
-            att = torch.matmul(q, k.transpose(-2, -1))  # Shape: (B, nh, T, T)
-            att = att / math.sqrt(k.size(-1)) 
-
+            att = ... 
             # Apply causal mask
-            att = att.masked_fill(self.mask[:, :, :T, :T].to(att.device) == 0, float('-inf'))
-
-            # Apply softmax to get attention weights
-            att = F.softmax(att, dim=-1)
-
-            # Apply dropout
-            att = self.attn_dropout(att)
-
             # Apply attention to the values
-            y = torch.matmul(att, v) # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
-
+            y = ... # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -232,31 +183,10 @@ class TransformerDecoderBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         # Initialize the layers
-        self.layer_norm_1 = RMSNorm(config.n_embd) #  layer_norm_1 (RMSNorm): Layer normalization applied before the self-attention layer.
-        self.self_attention = CausalSelfAttention(config) # self_attention (CausalSelfAttention): The causal self-attention layer.
-        self.layer_norm_2 = RMSNorm(config.n_embd) # layer_norm_2 (RMSNorm): Layer normalization applied before the MLP.
-        
-        # mlpf (nn.Sequential): A feedforward pass through the MLP with a:
-        # Linear (output=4*n_embd), 
-        # GELU non-linearity(use the BERTGELU),
-        # Linear (output=n_embd),
-        # and residual Dropout.
-        self.mlp = nn.Sequential( 
-            nn.Linear(config.n_embd, 4 * config.n_embd), # dimensionality expansion as we are told Linear (output=4*n_embd)
-            BERTGELU(), # Non-linear Activation, explicitly told to use the BERTGELU
-            nn.Linear(4 * config.n_embd, config.n_embd), # dimensionality reduction as we are told Linear (output=n_embd)
-            nn.Dropout(config.resid_pdrop)
-        )
-        # raise NotImplementedError
+        raise NotImplementedError
     def forward(self, x):
         # Forward pass through the Decoder Layer
-        x_norm_l1 = self.layer_norm_1(x) # Input x is normalized using RMSNorm
-        attention_x_norm = self.self_attention(x_norm_l1) # The normalized input is passed through the CausalSelfAttention layer
-        x = x + attention_x_norm  # The output of self-attention is added back to the original input x.
-
-        x_norm_l2 = self.layer_norm_2(x) # Input x is normalized using RMSNorm
-        mlp_x_norm = self.mlp(x_norm_l2) # The normalized x is passed through the MLP,
-        out = x + mlp_x_norm  # Residual connection and MLP: The output of the MLP is added back to the input x.
+        out = ...
         return out
 
 
@@ -460,7 +390,8 @@ class GPT(nn.Module):
 
         # Forward token and position embedders
         # token embeddings of shape (b, t, n_embd)
-        tok_emb = self.transformer.w_token_emb(idx)
+        # apply dropout to the tokens
+        tok_emb = ...
 
         if self.config.abs_emb:
             pos = torch.arange(0, t, dtype=torch.long, device=device).unsqueeze(0) # shape (1, t)
@@ -469,21 +400,9 @@ class GPT(nn.Module):
         else:
             x = tok_emb
 
-        # apply dropout to the tokens
-        x = self.transformer.drop(x)
-
         # Iterate through the transformer blocks
-        for block in self.transformer.h:
-            # The transformed tensor x is passed through all the TransformerDecoderBlock layers in self.transformer.h 
-            # Each block applies: normalization, attention and then mlp
-            x = block(x)
-
         # Apply final layer normalization and linear layer to produce logits
-        # The final output of the transformer layers is normalized using ln_f (RMSNorm).
-        x = self.transformer.ln_f(x)
-
-        # The normalized output x is projected to the vocabulary size using lm_head
-        logits = self.lm_head(x)
+        logits = ...
 
         return logits
 
@@ -526,49 +445,24 @@ class GPT(nn.Module):
             idx_cond = idx if idx.size(1) <= self.block_size else idx[:, -self.block_size:]
 
             # forward the model to get the logits for the index in the sequence
-            logits = self(idx_cond)  # (batch_size, seq_len, vocab_size)
-
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :]  # Take the logits for the last token
-            logits = logits / temperature  # Scale by temperature
 
             if not do_sample:
                 # take the most likely token
-                idx_next = torch.argmax(probs, dim=-1, keepdim=True)
+                idx_next = ...
             
             else:
                 # apply softmax to convert logits to (normalized) probabilities
-                probs = F.softmax(logits, dim=-1)
 
                 # optionally only consider top-k logits for sampling. 
                 if top_k is not None:
-                    # Top-K sampling: Keep only the top-k tokens
-                    values, indices = torch.topk(probs, k=top_k, dim=-1)
-                    probs = torch.zeros_like(probs).scatter_(-1, indices, values)
-                    probs = F.normalize(probs, p=1, dim=-1)
                     pass
 
                 # optionally apply top-p sampling
                 if top_p is not None:
-                    # Top-P sampling: Nucleus sampling
-                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
-                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
-
-                    # Find the cutoff index for the cumulative probability > top_p
-                    sorted_indices_to_remove = cumulative_probs > top_p
-                    sorted_indices_to_remove[:, 1:] = sorted_indices_to_remove[:, :-1].clone()
-                    sorted_indices_to_remove[:, 0] = False
-
-                    # Set probabilities for removed tokens to 0
-                    sorted_probs[sorted_indices_to_remove] = 0.0
-                    probs = torch.zeros_like(probs).scatter_(-1, sorted_indices, sorted_probs)
-                    probs = F.normalize(probs, p=1, dim=-1)
                     pass
-
-                # Sample from the modified probability distribution
-                idx_next = torch.multinomial(probs, num_samples=1)
             
             # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
+            idx = ...
 
         return idx
